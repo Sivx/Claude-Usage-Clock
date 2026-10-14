@@ -28,10 +28,10 @@
   .timelabel { fill: #fff; filter: drop-shadow(0 0 2px #fff); }
 
   /* Centre readouts: caption · big outlined time, kept well inside the inner ring. */
-  .face { position: absolute; left: 0; right: 0; top: 51px; text-align: center; font-variant-numeric: tabular-nums; }
+  .face { position: absolute; left: 0; right: 0; top: 55px; text-align: center; font-variant-numeric: tabular-nums; }
   .cap { font-size: 9px; font-weight: 700; letter-spacing: .12em; line-height: 12px; text-shadow: 0 0 5px currentColor; }
   .cap b { letter-spacing: 0; font-size: 10px; }
-  .time { font: 700 20px ui-monospace, "SF Mono", Menlo, monospace; line-height: 24px; white-space: nowrap;
+  .time { font: 700 16px ui-monospace, "SF Mono", Menlo, monospace; line-height: 20px; white-space: nowrap;
           -webkit-text-stroke: .8px currentColor; text-shadow: 0 0 2px currentColor, 0 0 7px currentColor; }
   .s { color: var(--s); } .w { color: var(--w); }
   .time.s { -webkit-text-fill-color: color-mix(in srgb, var(--s) 15%, transparent); }
@@ -108,7 +108,7 @@
   // nearest the arrow's number. Everything stays inside the ring's zone (degrees): WEEKLY on the top arc,
   // clear of the countdowns; SESSION almost all the way round, short of the E / F letters.
   // `r` and `cw` (char width) are set when the text is drawn.
-  const TAGS = { S: { name: "SESSION", zone: [158, 382] }, W: { name: "WEEKLY", zone: [219, 321] } };
+  const TAGS = { S: { name: "SESSION", zone: [158, 382] }, W: { name: "WEEKLY", zone: [152, 388] } };
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   function placeTags(k, arrowDeg, tickDeg, leftPct, timePct) {
     const { name, zone: [z0, z1], r, cw } = TAGS[k], span = (chars) => chars * cw / r * 180 / Math.PI, gap = span(.6);
