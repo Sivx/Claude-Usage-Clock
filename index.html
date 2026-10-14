@@ -69,7 +69,8 @@
       <circle cx="92" cy="92" r="55" fill="url(#faceGrad)" stroke="rgba(0,255,102,.2)" stroke-width="1"/>
       <g id="segsS"></g><g id="segsW"></g><g id="ends"></g>
       <g class="marker" id="markS"></g><g class="marker" id="markW"></g>
-      <g class="needle" id="tagS"></g><g class="needle" id="tagW"></g>
+      <g class="needle" id="nameS"></g><g class="needle" id="nameW"></g>
+      <g class="needle" id="numS" style="visibility: hidden"></g><g class="needle" id="numW" style="visibility: hidden"></g>
       <g class="needle" id="timeS" style="visibility: hidden"></g><g class="needle" id="timeW" style="visibility: hidden"></g><g class="needle" id="needleW"></g><g class="needle" id="needleS"></g>
     </svg>
     <div class="face">
@@ -103,35 +104,47 @@
   };
   const deg = (pct) => START + SWEEP * pct / 100;
   // Curved text along each ring, on one circle per ring (outside the session band, inside the weekly one):
-  // "SESSION 62%" with the number centred on the arrow, plus the white tick's time-left % at the tick.
-  // Everything stays inside the ring's zone (degrees): WEEKLY on the top arc, clear of the countdowns;
-  // SESSION almost all the way round, short of the E / F letters. `r` and `cw` (char width) are set when drawn.
+  // the % left at the arrow, the white tick's time-left % at the tick, and the ring's name wherever it fits
+  // nearest the arrow's number. Everything stays inside the ring's zone (degrees): WEEKLY on the top arc,
+  // clear of the countdowns; SESSION almost all the way round, short of the E / F letters.
+  // `r` and `cw` (char width) are set when the text is drawn.
   const TAGS = { S: { name: "SESSION", zone: [158, 382] }, W: { name: "WEEKLY", zone: [219, 321] } };
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   function placeTags(k, arrowDeg, tickDeg, leftPct, timePct) {
-    const { name, zone: [z0, z1], r, cw } = TAGS[k], span = (chars) => chars * cw / r * 180 / Math.PI;
+    const { name, zone: [z0, z1], r, cw } = TAGS[k], span = (chars) => chars * cw / r * 180 / Math.PI, gap = span(.6);
     const num = `${Math.round(leftPct)}%`, time = `${Math.round(timePct)}%`;
-    const wNum = span(num.length), wAll = span(name.length + 1 + num.length), wTime = span(time.length), gap = span(.5);
-    // Put the name on the side away from the tick, unless it would run out of room there.
-    let nameFirst = tickDeg >= arrowDeg;
-    if (nameFirst && arrowDeg + wNum / 2 - wAll < z0) nameFirst = false;
-    else if (!nameFirst && arrowDeg - wNum / 2 + wAll > z1) nameFirst = true;
-    const at = clamp(nameFirst ? arrowDeg - (wAll - wNum) / 2 : arrowDeg + (wAll - wNum) / 2, z0 + wAll / 2, z1 - wAll / 2);
-    const [a, b] = $("tagText" + k).firstChild.children;
-    [a.textContent, b.textContent] = nameFirst ? [name, " " + num] : [num + " ", name];
-    [a.style.fill, b.style.fill] = nameFirst ? [RINGS[k].color, levelColor(leftPct / 100)] : [levelColor(leftPct / 100), RINGS[k].color];
-    $("tag" + k).style.transform = `rotate(${at}deg)`;
-    // Time-left % at the tick, nudged clear of the label if they'd overlap.
-    let t = clamp(tickDeg, z0 + wTime / 2, z1 - wTime / 2);
-    const lo = at - wAll / 2, hi = at + wAll / 2;
-    if (t + wTime / 2 + gap > lo && t - wTime / 2 - gap < hi) {
-      const right = hi + gap + wTime / 2, left = lo - gap - wTime / 2;
-      const fitsRight = right <= z1 - wTime / 2, fitsLeft = left >= z0 + wTime / 2;
-      t = (t >= at && fitsRight) || !fitsLeft ? right : left;
+    const wNum = span(num.length), wTime = span(time.length), wName = span(name.length);
+    let n = clamp(arrowDeg, z0 + wNum / 2, z1 - wNum / 2), t = clamp(tickDeg, z0 + wTime / 2, z1 - wTime / 2);
+    // Numbers too close: spread them apart around their midpoint, then shift both back inside the zone.
+    const sep = (wNum + wTime) / 2 + gap;
+    if (Math.abs(n - t) < sep) {
+      const mid = (n + t) / 2, dir = n <= t ? 1 : -1;
+      n = mid - dir * sep / 2; t = mid + dir * sep / 2;
+      const lo = Math.min(n - wNum / 2, t - wTime / 2), hi = Math.max(n + wNum / 2, t + wTime / 2);
+      const shift = lo < z0 ? z0 - lo : hi > z1 ? z1 - hi : 0;
+      n += shift; t += shift;
     }
-    $("timeText" + k).firstChild.textContent = time;
-    $("time" + k).style.transform = `rotate(${t}deg)`;
-    $("time" + k).style.visibility = "visible";
+    // Name: in the free stretch of the zone that lets it sit closest to the arrow's number. If none fits,
+    // WEEKLY drops to the bottom of the dial (under the WK caption); SESSION is just hidden.
+    const taken = [[n - wNum / 2, n + wNum / 2], [t - wTime / 2, t + wTime / 2]].sort((a, b) => a[0] - b[0]);
+    const free = [[z0, taken[0][0] - gap], [taken[0][1] + gap, taken[1][0] - gap], [taken[1][1] + gap, z1]];
+    let best = null;
+    for (const [lo, hi] of free) {
+      if (hi - lo < wName) continue;
+      const c = clamp(n, lo + wName / 2, hi - wName / 2);
+      if (best === null || Math.abs(c - n) < Math.abs(best - n)) best = c;
+    }
+    const set = (id, text, at, fill) => {
+      const tp = $(id + "Text" + k).firstChild;
+      if (tp.textContent !== text) tp.textContent = text;
+      if (fill) tp.style.fill = fill;
+      if (at !== null) $(id + k).style.transform = `rotate(${at}deg)`;
+      $(id + k).style.visibility = at === null ? "hidden" : "visible";
+    };
+    set("num", num, n, levelColor(leftPct / 100));
+    set("time", time, t);
+    set("name", name, best);
+    if (k === "W") $("nameWBottom").style.visibility = best === null ? "visible" : "hidden";
   }
   // Fuel-gauge colouring by position: red low end, yellow middle, green high.
   const levelColor = (f) => f < .2 ? "var(--bad)" : f < .45 ? "var(--warn)" : "var(--ok)";
@@ -167,16 +180,17 @@
     // Curved ring text (see placeTags), drawn around 0° in groups that placeTags rotates into place.
     for (const [k, r] of [["S", RINGS.S.arrow[1] + 2], ["W", RINGS.W.r - RINGS.W.w / 2 - 9.5]]) {
       const [x0, y0] = pt(r, -70), [x1, y1] = pt(r, 70), { name } = TAGS[k];
-      make("path", { id: "lbl" + k, d: `M${x0},${y0} A${r},${r} 0 0 1 ${x1},${y1}`, fill: "none" }, $("tag" + k));
-      const t = make("text", { id: "tagText" + k, class: "ringlabel", fill: RINGS[k].color, "text-anchor": "middle" }, $("tag" + k));
-      const tp = make("textPath", { href: "#lbl" + k, startOffset: "50%" }, t);
-      make("tspan", {}, tp).textContent = name;
-      make("tspan", {}, tp);
-      const tt = make("text", { id: "timeText" + k, class: "ringlabel timelabel", "text-anchor": "middle" }, $("time" + k));
-      make("textPath", { href: "#lbl" + k, startOffset: "50%" }, tt);
-      Object.assign(TAGS[k], { r, cw: t.getComputedTextLength() / name.length });
-      $("tag" + k).style.transform = `rotate(${TAGS[k].zone[0] + TAGS[k].cw * name.length / r * 90 / Math.PI}deg)`;
+      make("path", { id: "lbl" + k, d: `M${x0},${y0} A${r},${r} 0 0 1 ${x1},${y1}`, fill: "none" }, $("name" + k));
+      for (const [id, cls] of [["name", "ringlabel"], ["num", "ringlabel"], ["time", "ringlabel timelabel"]]) {
+        const t = make("text", { id: id + "Text" + k, class: cls, fill: RINGS[k].color, "text-anchor": "middle" }, $(id + k));
+        make("textPath", { href: "#lbl" + k, startOffset: "50%" }, t);
+      }
+      $("nameText" + k).firstChild.textContent = name;
+      Object.assign(TAGS[k], { r, cw: $("nameText" + k).getComputedTextLength() / name.length });
+      $("name" + k).style.transform = `rotate(${TAGS[k].zone[0] + TAGS[k].cw * name.length / r * 90 / Math.PI}deg)`;
     }
+    make("text", { id: "nameWBottom", x: CX + 1, y: CY + 49, class: "ringlabel", fill: RINGS.W.color, "text-anchor": "middle",
+                   style: "visibility: hidden" }, $("ends")).textContent = TAGS.W.name;
     // E / F at the ends of the sweep, like a fuel gauge.
     const [ex, ey] = pt(RINGS.S.r, START), [fx, fy] = pt(RINGS.S.r, START + SWEEP);
     make("text", { x: ex + 2, y: ey + 15, "text-anchor": "middle", class: "end" }, $("ends")).textContent = "E";
@@ -274,7 +288,7 @@
       $("pct").textContent = Math.round(100 - (s?.utilization ?? 0)) + "%";
       $("count").textContent = "-:--:--";
       $("markS").style.visibility = "hidden";
-      $("timeS").style.visibility = "hidden";
+      $("timeS").style.visibility = $("numS").style.visibility = "hidden";
       tip.push("5H SESSION: no active session");
     }
 
