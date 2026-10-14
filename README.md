@@ -2,6 +2,8 @@
 
 A small always-on-top desktop widget for macOS that shows how much of your Claude Code usage allowance is left, styled like a fuel gauge.
 
+<p align="center"><img src="docs/screenshot.png" width="420" alt="Claude Usage Clock widget showing 62% of the session and 54% of the week left"></p>
+
 - **Outer ring: 5-hour session.** **Inner ring: weekly limit.**
 - Lit segments show the allowance left (green → yellow → red as it runs low). Gray segments are used up.
 - The **triangle** on each ring points at the % left and shows that number beside it.
