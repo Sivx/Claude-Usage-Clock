@@ -1,0 +1,329 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>
+  :root { --bg: rgba(0,8,3,.9); --fg: #c8ffd9; --dim: #3f9a5c; --track: rgba(200,205,202,.42);
+          --ok: #00ff66; --warn: #e8ff3b; --bad: #ff3b3b;
+          --s: #eafff2; --w: #4fd8ff; } /* identity colours: --s = session, --w = week */
+  html, body { margin: 0; background: transparent; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--fg); user-select: none; }
+  .card { margin: 6px; padding: 6px 6px 2px; border-radius: 18px; background: var(--bg);
+          -webkit-app-region: drag; position: relative; overflow: hidden;
+          border: 1px solid rgba(0,255,102,.3); box-shadow: inset 0 0 18px rgba(0,255,102,.10); }
+  .scan { position: absolute; inset: 0; pointer-events: none; z-index: 3;
+          background: repeating-linear-gradient(to bottom, rgba(0,0,0,.18) 0 1px, transparent 1px 3px),
+                      radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.45) 100%); } /* scanlines + vignette */
+
+  .dial { position: relative; z-index: 2; width: 184px; height: 146px; margin: 0 auto; }
+  .dial svg { overflow: visible; position: absolute; inset: 0; }
+  .seg { fill: none; transition: stroke .4s; }
+  .needle, .marker { transform-origin: 92px 92px; }
+  .needle { transition: transform 1s cubic-bezier(.3,1.5,.5,1); }
+  .needle polygon { stroke: rgba(0,0,0,.85); stroke-width: 1.3; stroke-linejoin: round; transition: fill .4s; }
+  .marker { transition: transform 1s; visibility: hidden; }
+  .marker line { filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 4px #fff); }
+  .end { font: 700 9px ui-monospace, Menlo, monospace; fill: var(--dim); }
+  .ringlabel { font: 700 7px ui-monospace, Menlo, monospace; letter-spacing: .25em; white-space: pre; }
+  .timelabel { fill: #fff; filter: drop-shadow(0 0 2px #fff); }
+
+  /* Centre readouts: caption · big outlined time, kept well inside the inner ring. */
+  .face { position: absolute; left: 0; right: 0; top: 51px; text-align: center; font-variant-numeric: tabular-nums; }
+  .cap { font-size: 9px; font-weight: 700; letter-spacing: .12em; line-height: 12px; text-shadow: 0 0 5px currentColor; }
+  .cap b { letter-spacing: 0; font-size: 10px; }
+  .time { font: 700 20px ui-monospace, "SF Mono", Menlo, monospace; line-height: 24px; white-space: nowrap;
+          -webkit-text-stroke: .8px currentColor; text-shadow: 0 0 2px currentColor, 0 0 7px currentColor; }
+  .s { color: var(--s); } .w { color: var(--w); }
+  .time.s { -webkit-text-fill-color: color-mix(in srgb, var(--s) 15%, transparent); }
+  .time.w { -webkit-text-fill-color: color-mix(in srgb, var(--w) 30%, transparent); }
+  .time.s.soon { color: var(--warn); -webkit-text-fill-color: color-mix(in srgb, var(--warn) 15%, transparent); }
+  .rule { width: 64px; height: 1px; margin: 3px auto; background: linear-gradient(90deg, transparent, rgba(0,255,102,.35), transparent); }
+
+  .dot { z-index: 4; position: absolute; top: 8px; right: 9px; width: 5px; height: 5px; border-radius: 50%;
+         background: var(--ok); box-shadow: 0 0 5px var(--ok); }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 5px var(--warn); }
+  .btns { z-index: 4; position: absolute; top: 4px; right: 7px; display: none; gap: 4px; -webkit-app-region: no-drag;
+          background: var(--bg); border-radius: 8px; }
+  .card:hover .btns { display: flex; }
+  .btns button { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 12px; padding: 1px 3px; }
+  .btns button:hover { color: var(--fg); }
+  /* Colour pickers for the two rings, shown as small swatches next to the buttons. */
+  .btns input[type=color] { width: 12px; height: 12px; margin: 3px 1px; padding: 0; border: 1px solid rgba(255,255,255,.4);
+                            border-radius: 50%; background: none; cursor: pointer; }
+  .btns input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+  .btns input[type=color]::-webkit-color-swatch { border: 0; border-radius: 50%; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="scan"></div>
+  <div class="dot" id="dot"></div>
+  <div class="btns"><input type="color" id="pickS" title="Session colour"><input type="color" id="pickW" title="Weekly colour"><button id="r" title="Refresh">↻</button><button id="q" title="Quit">✕</button></div>
+  <div class="dial" id="dial">
+    <svg width="184" height="146" id="svg">
+      <defs>
+        <radialGradient id="faceGrad" cx="50%" cy="40%" r="60%">
+          <stop offset="0%" stop-color="#03140a"/><stop offset="80%" stop-color="#010603"/><stop offset="100%" stop-color="#000"/>
+        </radialGradient>
+      </defs>
+      <circle cx="92" cy="92" r="55" fill="url(#faceGrad)" stroke="rgba(0,255,102,.2)" stroke-width="1"/>
+      <g id="segsS"></g><g id="segsW"></g><g id="ends"></g>
+      <g class="marker" id="markS"></g><g class="marker" id="markW"></g>
+      <g class="needle" id="tagS"></g><g class="needle" id="tagW"></g>
+      <g class="needle" id="timeS" style="visibility: hidden"></g><g class="needle" id="timeW" style="visibility: hidden"></g><g class="needle" id="needleW"></g><g class="needle" id="needleS"></g>
+    </svg>
+    <div class="face">
+      <div class="cap s">5H · <b id="pct">–</b></div>
+      <div class="time s" id="count">-:--:--</div>
+      <div class="rule"></div>
+      <div class="time w" id="wcount"></div>
+      <div class="cap w">WK · <b id="wpct">–</b></div>
+    </div>
+  </div>
+</div>
+<script>
+  const SESSION_MS = 5 * 3600e3, WEEK_MS = 7 * 24 * 3600e3;
+  const PACES = {
+    early: { text: "just started", color: "var(--ok)" },
+    even:  { text: "on pace",      color: "var(--ok)" },
+    fast:  { text: "a bit fast",   color: "var(--warn)" },
+    panic: { text: "way too fast", color: "var(--bad)" },
+    dead:  { text: "limit hit",    color: "var(--bad)" },
+  };
+  let data = null, st = null;
+  const $ = (id) => document.getElementById(id);
+
+  // Dual gauge: 240° sweep opening at the bottom, 0% (E) at lower-left, 100% (F) at lower-right.
+  // Outer ring = session (white outline), inner ring = week (violet outline).
+  // Everything (segments, outlines, arrows, ticks) is derived from these numbers.
+  const CX = 92, CY = 92, START = 150, SWEEP = 240;
+  const RINGS = {
+    S: { r: 77, w: 8, n: 32, color: "var(--s)", arrow: [70.5, 87, 6.5] },  // arrow: [tip r, base r, half-width]
+    W: { r: 61, w: 8, n: 26, color: "var(--w)", arrow: [54.5, 70, 6] },
+  };
+  const deg = (pct) => START + SWEEP * pct / 100;
+  // Curved text along each ring, on one circle per ring (outside the session band, inside the weekly one):
+  // "SESSION 62%" with the number centred on the arrow, plus the white tick's time-left % at the tick.
+  // Everything stays inside the ring's zone (degrees): WEEKLY on the top arc, clear of the countdowns;
+  // SESSION almost all the way round, short of the E / F letters. `r` and `cw` (char width) are set when drawn.
+  const TAGS = { S: { name: "SESSION", zone: [158, 382] }, W: { name: "WEEKLY", zone: [219, 321] } };
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  function placeTags(k, arrowDeg, tickDeg, leftPct, timePct) {
+    const { name, zone: [z0, z1], r, cw } = TAGS[k], span = (chars) => chars * cw / r * 180 / Math.PI;
+    const num = `${Math.round(leftPct)}%`, time = `${Math.round(timePct)}%`;
+    const wNum = span(num.length), wAll = span(name.length + 1 + num.length), wTime = span(time.length), gap = span(.5);
+    // Put the name on the side away from the tick, unless it would run out of room there.
+    let nameFirst = tickDeg >= arrowDeg;
+    if (nameFirst && arrowDeg + wNum / 2 - wAll < z0) nameFirst = false;
+    else if (!nameFirst && arrowDeg - wNum / 2 + wAll > z1) nameFirst = true;
+    const at = clamp(nameFirst ? arrowDeg - (wAll - wNum) / 2 : arrowDeg + (wAll - wNum) / 2, z0 + wAll / 2, z1 - wAll / 2);
+    const [a, b] = $("tagText" + k).firstChild.children;
+    [a.textContent, b.textContent] = nameFirst ? [name, " " + num] : [num + " ", name];
+    [a.style.fill, b.style.fill] = nameFirst ? [RINGS[k].color, levelColor(leftPct / 100)] : [levelColor(leftPct / 100), RINGS[k].color];
+    $("tag" + k).style.transform = `rotate(${at}deg)`;
+    // Time-left % at the tick, nudged clear of the label if they'd overlap.
+    let t = clamp(tickDeg, z0 + wTime / 2, z1 - wTime / 2);
+    const lo = at - wAll / 2, hi = at + wAll / 2;
+    if (t + wTime / 2 + gap > lo && t - wTime / 2 - gap < hi) {
+      const right = hi + gap + wTime / 2, left = lo - gap - wTime / 2;
+      const fitsRight = right <= z1 - wTime / 2, fitsLeft = left >= z0 + wTime / 2;
+      t = (t >= at && fitsRight) || !fitsLeft ? right : left;
+    }
+    $("timeText" + k).firstChild.textContent = time;
+    $("time" + k).style.transform = `rotate(${t}deg)`;
+    $("time" + k).style.visibility = "visible";
+  }
+  // Fuel-gauge colouring by position: red low end, yellow middle, green high.
+  const levelColor = (f) => f < .2 ? "var(--bad)" : f < .45 ? "var(--warn)" : "var(--ok)";
+
+  (() => {
+    const NS = "http://www.w3.org/2000/svg";
+    const pt = (r, d) => [CX + r * Math.cos(d * Math.PI / 180), CY + r * Math.sin(d * Math.PI / 180)].map((n) => +n.toFixed(2));
+    const make = (tag, attrs, parent) => {
+      const el = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      parent.appendChild(el);
+      return el;
+    };
+    for (const [k, { r, w, n, color, arrow }] of Object.entries(RINGS)) {
+      const step = SWEEP / n, g = $("segs" + k);
+      for (let i = 0; i < n; i++) {
+        const [x0, y0] = pt(r, START + i * step + .9), [x1, y1] = pt(r, START + (i + 1) * step - .9);
+        make("path", { d: `M${x0},${y0} A${r},${r} 0 0 1 ${x1},${y1}`, class: "seg",
+                       style: `stroke: var(--track); stroke-width: ${w}` }, g);
+      }
+      // Thin outline around the whole band, in the ring's identity colour.
+      const ro = r + w / 2 + 1.2, ri = r - w / 2 - 1.2, END = START + SWEEP;
+      const [ox0, oy0] = pt(ro, START), [ox1, oy1] = pt(ro, END), [ix1, iy1] = pt(ri, END), [ix0, iy0] = pt(ri, START);
+      make("path", { d: `M${ox0},${oy0} A${ro},${ro} 0 1 1 ${ox1},${oy1} L${ix1},${iy1} A${ri},${ri} 0 1 0 ${ix0},${iy0} Z`,
+                     fill: "none", stroke: color, "stroke-width": k === "W" ? 1.2 : .9, "stroke-linejoin": "round", opacity: k === "W" ? 1 : .75,
+                   }, g);
+      // Even-pace tick across the band, and the arrowhead pointing in at the actual level (both drawn at 0°, then rotated).
+      make("line", { x1: CX + ri - 1, y1: CY, x2: CX + ro + 1, y2: CY, stroke: "#fff", "stroke-width": 2.4, "stroke-linecap": "round" }, $("mark" + k));
+      const [tip, base, hw] = arrow;
+      make("polygon", { points: `${CX + tip},${CY} ${CX + base},${CY - hw} ${CX + base},${CY + hw}` }, $("needle" + k));
+      $("needle" + k).style.transform = `rotate(${START}deg)`;
+    }
+    // Curved ring text (see placeTags), drawn around 0° in groups that placeTags rotates into place.
+    for (const [k, r] of [["S", RINGS.S.arrow[1] + 2], ["W", RINGS.W.r - RINGS.W.w / 2 - 9.5]]) {
+      const [x0, y0] = pt(r, -70), [x1, y1] = pt(r, 70), { name } = TAGS[k];
+      make("path", { id: "lbl" + k, d: `M${x0},${y0} A${r},${r} 0 0 1 ${x1},${y1}`, fill: "none" }, $("tag" + k));
+      const t = make("text", { id: "tagText" + k, class: "ringlabel", fill: RINGS[k].color, "text-anchor": "middle" }, $("tag" + k));
+      const tp = make("textPath", { href: "#lbl" + k, startOffset: "50%" }, t);
+      make("tspan", {}, tp).textContent = name;
+      make("tspan", {}, tp);
+      const tt = make("text", { id: "timeText" + k, class: "ringlabel timelabel", "text-anchor": "middle" }, $("time" + k));
+      make("textPath", { href: "#lbl" + k, startOffset: "50%" }, tt);
+      Object.assign(TAGS[k], { r, cw: t.getComputedTextLength() / name.length });
+      $("tag" + k).style.transform = `rotate(${TAGS[k].zone[0] + TAGS[k].cw * name.length / r * 90 / Math.PI}deg)`;
+    }
+    // E / F at the ends of the sweep, like a fuel gauge.
+    const [ex, ey] = pt(RINGS.S.r, START), [fx, fy] = pt(RINGS.S.r, START + SWEEP);
+    make("text", { x: ex + 2, y: ey + 15, "text-anchor": "middle", class: "end" }, $("ends")).textContent = "E";
+    make("text", { x: fx - 2, y: fy + 15, "text-anchor": "middle", class: "end" }, $("ends")).textContent = "F";
+  })();
+
+  // Light segments for % left, swing the arrow (coloured by pace), place the even-pace tick (= % of time left).
+  function setDial(k, leftPct, elapsed) {
+    const { n } = RINGS[k];
+    $("segs" + k).querySelectorAll(".seg").forEach((el, i) => {
+      const on = (i + .5) / n * 100 < leftPct;
+      el.classList.toggle("on", on);
+      el.style.stroke = el.style.color = on ? levelColor((i + .5) / n) : "var(--track)";
+    });
+    $("needle" + k).style.transform = `rotate(${deg(leftPct)}deg)`;
+    placeTags(k, deg(leftPct), deg(100 - elapsed), leftPct, 100 - elapsed);
+    // Only touch the arrow when its colour changes; re-setting the filter every tick forces costly repaints.
+    // Arrows match the segment they point at: green plenty left, yellow middle, red low.
+    const arrow = $("needle" + k).querySelector("polygon"), c = levelColor(leftPct / 100);
+    if (arrow.dataset.c !== c) {
+      arrow.dataset.c = c;
+      arrow.style.fill = c;
+      arrow.style.filter = `drop-shadow(0 0 4px ${c})`;
+    }
+    $("mark" + k).style.transform = `rotate(${deg(100 - elapsed)}deg)`;
+    $("mark" + k).style.visibility = "visible";
+  }
+
+  // ---- Effects ----
+  const GLYPHS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789Z:<>=*+";
+  const glyph = () => GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+
+
+  // Decode effect: characters cycle through glyphs before landing on the new value.
+  function scramble(el, text) {
+    if (el.dataset.v === text) return;
+    el.dataset.v = text;
+    clearInterval(el._t);
+    let n = 0;
+    el._t = setInterval(() => {
+      n++;
+      el.textContent = [...text].map((c, i) => (i < n / 2 ? c : glyph())).join("");
+      if (n / 2 >= text.length) { clearInterval(el._t); el.textContent = text; }
+    }, 45);
+  }
+
+  function dur(ms) {
+    const m = Math.max(0, Math.round(ms / 60e3)), d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60);
+    return d ? `${d}d ${h}h` : h ? `${h}h ${String(m % 60).padStart(2, "0")}m` : `${m}m`;
+  }
+
+  function hms(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000)), d = Math.floor(s / 86400);
+    const parts = [Math.floor(s % 86400 / 3600), Math.floor(s % 3600 / 60), s % 60];
+    if (!d && parts[0] === 0) parts.shift(); // drop leading "00:" hours
+    const t = parts.map((n, i) => (i ? String(n).padStart(2, "0") : n)).join(":");
+    return d ? `${d}d ${t}` : t;
+  }
+
+  // Compare % used against % of the window that has elapsed.
+  function pace(win, windowMs) {
+    const now = Date.now(), resetAt = new Date(win.resets_at).getTime();
+    const left = resetAt - now;
+    const elapsed = Math.min(1, Math.max(0, 1 - left / windowMs)) * 100;
+    const used = win.utilization;
+    let kind = "even";
+    if (used >= 100) kind = "dead";
+    else if (elapsed < 3 && used < 5) kind = "early";
+    else if (used > elapsed + 15 && used > elapsed * 1.5) kind = "panic";
+    else if (used > elapsed + 5 && used > elapsed * 1.15) kind = "fast";
+
+    // Project forward at the current rate.
+    const rate = elapsed > 0 ? used / (windowMs * elapsed / 100) : 0; // % per ms
+    let note;
+    if (used >= 100) note = "limit reached";
+    else if ((kind === "fast" || kind === "panic") && rate > 0 && (100 - used) / rate < left) note = `runs out in ${dur((100 - used) / rate)}`;
+    else note = `${Math.round(used)}% used · ${Math.round(elapsed)}% of time gone`;
+    return { kind, elapsed, used, left, note };
+  }
+
+  function render() {
+    if (!data) return;
+    const s = data.session, w = data.weekly;
+    const tip = [];
+
+    if (s?.resets_at) {
+      const p = pace(s, SESSION_MS);
+      const leftPct = Math.max(0, 100 - p.used);
+      setDial("S", leftPct, p.elapsed);
+      scramble($("pct"), Math.round(leftPct) + "%");
+      $("count").textContent = hms(p.left);
+      $("count").classList.toggle("soon", p.left < 15 * 60e3);
+      tip.push(`5H SESSION (outer ring): ${Math.round(leftPct)}% left · ${PACES[p.kind].text} · ${p.note}`);
+    } else {
+      $("pct").textContent = Math.round(100 - (s?.utilization ?? 0)) + "%";
+      $("count").textContent = "-:--:--";
+      $("markS").style.visibility = "hidden";
+      $("timeS").style.visibility = "hidden";
+      tip.push("5H SESSION: no active session");
+    }
+
+    if (w?.resets_at) {
+      const p = pace(w, WEEK_MS);
+      const wleft = Math.max(0, 100 - p.used);
+      setDial("W", wleft, p.elapsed);
+      scramble($("wpct"), Math.round(wleft) + "%");
+      // Days away: "3d 4:47" (no seconds). Under a day: full ticking countdown.
+      $("wcount").textContent = p.left >= 86400e3 ? hms(p.left).replace(/:\d\d$/, "") : hms(p.left);
+      tip.push(`WEEK (inner ring): ${Math.round(wleft)}% left · ${PACES[p.kind].text} · ${p.note}\nWeek resets ` +
+        new Date(w.resets_at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }));
+    }
+    $("dial").title = tip.join("\n") +
+      "\nArrows = where you are (green plenty left · yellow middle · red running low)\nWhite ticks = where an even pace would put you";
+  }
+
+  function ago(ms) { const m = Math.floor(ms / 60e3); return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`; }
+  // Status lives in a small dot; details on hover.
+  function renderStatus() {
+    if (!st) return;
+    const next = Math.max(0, st.nextAt - Date.now()), retry = next < 60e3 ? `${Math.ceil(next / 1000)}s` : `${Math.ceil(next / 60e3)}m`;
+    const dot = $("dot");
+    dot.classList.toggle("warn", !!st.error);
+    dot.title = st.error
+      ? `${st.error} · retry in ${retry}` + (st.fetchedAt ? ` · data ${ago(Date.now() - st.fetchedAt)}` : "")
+      : st.fetchedAt ? `Updated ${ago(Date.now() - st.fetchedAt)}` : "Loading…";
+  }
+  setInterval(() => { render(); renderStatus(); }, 1000);
+
+  window.clock.onUsage((u) => {
+    st = u;
+    if (u.data) data = u.data;
+    render(); renderStatus();
+  });
+  // Ring colours: picked with the swatches, remembered between launches.
+  for (const k of ["s", "w"]) {
+    const input = $("pick" + k.toUpperCase()), root = document.documentElement;
+    let saved = null;
+    try { saved = localStorage.getItem("color-" + k); } catch {}
+    if (saved) root.style.setProperty("--" + k, saved);
+    input.value = getComputedStyle(root).getPropertyValue("--" + k).trim();
+    input.oninput = () => {
+      root.style.setProperty("--" + k, input.value);
+      try { localStorage.setItem("color-" + k, input.value); } catch {}
+    };
+  }
+  $("r").onclick = () => window.clock.refresh();
+  $("q").onclick = () => window.clock.quit();
+</script>
+</body>
+</html>

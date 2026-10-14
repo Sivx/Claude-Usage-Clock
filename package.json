@@ -1,0 +1,8 @@
+{
+  "name": "claude-clock",
+  "version": "1.0.0",
+  "description": "Floating widget showing remaining Claude Code usage",
+  "main": "main.js",
+  "scripts": { "start": "electron ." },
+  "devDependencies": { "electron": "^38.0.0" }
+}
