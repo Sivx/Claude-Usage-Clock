@@ -27,10 +27,9 @@
   .ringlabel { font: 700 7px ui-monospace, Menlo, monospace; letter-spacing: .25em; white-space: pre; }
   .timelabel { fill: #fff; filter: drop-shadow(0 0 2px #fff); }
 
-  /* Centre readouts: caption · big outlined time, kept well inside the inner ring. */
+  /* Centre readouts: the two countdowns, each with a small name (above session, below week). */
   .face { position: absolute; left: 0; right: 0; top: 55px; text-align: center; font-variant-numeric: tabular-nums; }
-  .cap { font-size: 9px; font-weight: 700; letter-spacing: .12em; line-height: 12px; text-shadow: 0 0 5px currentColor; }
-  .cap b { letter-spacing: 0; font-size: 10px; }
+  .cap { font-size: 7px; font-weight: 700; letter-spacing: .3em; line-height: 12px; opacity: .75; text-shadow: 0 0 4px currentColor; }
   .time { font: 700 16px ui-monospace, "SF Mono", Menlo, monospace; line-height: 20px; white-space: nowrap;
           -webkit-text-stroke: .8px currentColor; text-shadow: 0 0 2px currentColor, 0 0 7px currentColor; }
   .s { color: var(--s); } .w { color: var(--w); }
@@ -74,11 +73,11 @@
       <g class="needle" id="timeS" style="visibility: hidden"></g><g class="needle" id="timeW" style="visibility: hidden"></g><g class="needle" id="needleW"></g><g class="needle" id="needleS"></g>
     </svg>
     <div class="face">
-      <div class="cap s">5H · <b id="pct">–</b></div>
+      <div class="cap s">SESSION</div>
       <div class="time s" id="count">-:--:--</div>
       <div class="rule"></div>
       <div class="time w" id="wcount"></div>
-      <div class="cap w">WK · <b id="wpct">–</b></div>
+      <div class="cap w">WEEKLY</div>
     </div>
   </div>
 </div>
@@ -125,7 +124,7 @@
       n += shift; t += shift;
     }
     // Name: in the free stretch of the zone that lets it sit closest to the arrow's number. If none fits,
-    // WEEKLY drops to the bottom of the dial (under the WK caption); SESSION is just hidden.
+    // WEEKLY drops to the bottom of the dial (under the countdowns); SESSION is just hidden.
     const taken = [[n - wNum / 2, n + wNum / 2], [t - wTime / 2, t + wTime / 2]].sort((a, b) => a[0] - b[0]);
     const free = [[z0, taken[0][0] - gap], [taken[0][1] + gap, taken[1][0] - gap], [taken[1][1] + gap, z1]];
     let best = null;
@@ -219,24 +218,6 @@
     $("mark" + k).style.visibility = "visible";
   }
 
-  // ---- Effects ----
-  const GLYPHS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789Z:<>=*+";
-  const glyph = () => GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
-
-
-  // Decode effect: characters cycle through glyphs before landing on the new value.
-  function scramble(el, text) {
-    if (el.dataset.v === text) return;
-    el.dataset.v = text;
-    clearInterval(el._t);
-    let n = 0;
-    el._t = setInterval(() => {
-      n++;
-      el.textContent = [...text].map((c, i) => (i < n / 2 ? c : glyph())).join("");
-      if (n / 2 >= text.length) { clearInterval(el._t); el.textContent = text; }
-    }, 45);
-  }
-
   function dur(ms) {
     const m = Math.max(0, Math.round(ms / 60e3)), d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60);
     return d ? `${d}d ${h}h` : h ? `${h}h ${String(m % 60).padStart(2, "0")}m` : `${m}m`;
@@ -280,12 +261,10 @@
       const p = pace(s, SESSION_MS);
       const leftPct = Math.max(0, 100 - p.used);
       setDial("S", leftPct, p.elapsed);
-      scramble($("pct"), Math.round(leftPct) + "%");
       $("count").textContent = hms(p.left);
       $("count").classList.toggle("soon", p.left < 15 * 60e3);
       tip.push(`5H SESSION (outer ring): ${Math.round(leftPct)}% left · ${PACES[p.kind].text} · ${p.note}`);
     } else {
-      $("pct").textContent = Math.round(100 - (s?.utilization ?? 0)) + "%";
       $("count").textContent = "-:--:--";
       $("markS").style.visibility = "hidden";
       $("timeS").style.visibility = $("numS").style.visibility = "hidden";
@@ -296,7 +275,6 @@
       const p = pace(w, WEEK_MS);
       const wleft = Math.max(0, 100 - p.used);
       setDial("W", wleft, p.elapsed);
-      scramble($("wpct"), Math.round(wleft) + "%");
       // Days away: "3d 4:47" (no seconds). Under a day: full ticking countdown.
       $("wcount").textContent = p.left >= 86400e3 ? hms(p.left).replace(/:\d\d$/, "") : hms(p.left);
       tip.push(`WEEK (inner ring): ${Math.round(wleft)}% left · ${PACES[p.kind].text} · ${p.note}\nWeek resets ` +
